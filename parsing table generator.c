@@ -44,7 +44,7 @@ enum _State
 	FIND
 };
 
-enum _MergetMode
+enum _MergeMode
 {
 	REPEAT_ALLOWED,
 	REPEAT_BANNED
@@ -130,25 +130,25 @@ struct _Node
 void waitForCommand();
 bool initGrammar();
 bool readLines();
-char *effectiveStr();
+char *effectiveStr(char *str);
 bool formPrimitiveProductionSet();
 void formOrderedPrimitiveSymbolSet();
 void formOrderedPrimitiveSymbolArray();
 void formProductions();
-ItemSet *CLOSUREForLR0();
-ItemSet *CLOSUREForLR1();
-ItemSet *GOTOForLR0();
-ItemSet *findGOTO();
-List *FIRSTForSymbol();
-List *FIRSTForSymbolStr();
+ItemSet *CLOSUREForLR0(ItemSet *I);
+ItemSet *CLOSUREForLR1(ItemSet *I);
+ItemSet *GOTOForLR0(ItemSet *I, unsigned short symbol);
+ItemSet *findGOTO(ItemSet *I, unsigned short symbol);
+List *FIRSTForSymbol(unsigned short symbol);
+List *FIRSTForSymbolStr(unsigned short *symbolStr);
 ItemSetCollection *itemSetCollectionForLR0();
 ItemSetCollection *itemSetCollectionForLALR();
-Action *generateAction();
-void formSelfGeneratedLookAheads();
-void formSpreadedLookAheads();
+Action *generateAction(Action *prev, Action *action);
+void formSelfGeneratedLookAheads(ItemSetCollection *lr0);
+void formSpreadedLookAheads(ItemSetCollection *lr0);
 void eliminateLeftRecursion();
-void eliminateInstantLeftRecursion();
-void eliminateEpsilon();
+void eliminateInstantLeftRecursion(String *headStr);
+void eliminateEpsilon(List *list);
 void kernelize();
 bool formParsingTable();
 void printParsingTable();
@@ -158,41 +158,40 @@ void freeParsingTable();
 void freeSymbolArray();
 void freeProductions();
 void printSymbolEnum();
-void printEnumStr();
-unsigned short *getCatenatedSymbolStr();
-unsigned short symbolId();
-bool isProduction();
-bool isEffectiveStr();
-bool isEffectiveHead();
-bool hasLeftRecursion();
-bool hasEpsilon();
-bool spread();
-char *strStart();
-char *strEnd();
-String *strDup();
-String *getAuxiliaryStr();
-Item *getSpreadee();
+void printEnumStr(char *str);
+unsigned short *getCatenatedSymbolStr(unsigned short *start, unsigned short lookAhead);
+unsigned short symbolId(char *symbolStr);
+bool isProduction(char *str);
+bool isEffectiveStr(char *str);
+bool isEffectiveHead(char *str);
+bool hasLeftRecursion(String *headStr);
+bool hasEpsilon(List *list);
+bool spread(Item *spreader);
+char *strStart(char *str);
+char *strEnd(char *str, char c);
+String *strDup(char *start, char *end);
+String *getAuxiliaryStr(char *headStr);
 
-Short *newShort();
-String *newString();
-PrimitiveProduction *newPp();
-Item *newItem();
-GotoMap *newGotoMap();
-SpreadMap *newSpreadMap();
-Action *newAction();
+Short *newShort(unsigned short val);
+String *newString(char *str);
+PrimitiveProduction *newPp(String *headStr, List *bodyStrs);
+Item *newItem(unsigned short id, unsigned short pos);
+GotoMap *newGotoMap(List *itemSet, unsigned short symbol, List *gotoSet);
+SpreadMap *newSpreadMap(Item *spreader, Item *spreadee);
+Action *newAction(ActionType actionType, unsigned short id);
 List *newList();
-void addElem();
-void removeElem();
-void freeElem();
-void freeList();
-void printElem();
-void printList();
-unsigned short listSize();
-unsigned short elemId();
-bool equals();
-void *equalElem();
-void addList();
-void *clone();
+void addElem(List *list, void *elem);
+void removeElem(List *list, void *elem);
+void freeElem(void *elem);
+void freeList(List *list);
+void printElem(void *elem);
+void printList(List *list);
+unsigned short listSize(List *list);
+unsigned short elemId(List *list, void *elem);
+bool equals(void *elem1, void *elem2);
+void *equalElem(List *list, void *elem);
+void addList(List *list1, List *list2, MergeMode mode);
+void *clone(void *elem);
 
 bool containerOnly;
 bool listOrderConsidered;
@@ -210,11 +209,13 @@ List *gotoMapSet;
 List *spreadMapSet;
 List *lalr;//LALR项集族
 Action **parsingTable;
-FILE *fout = stdout;
+FILE *fout;
 FILE *fin;
 
 void main()
-{	
+{
+	fout = stdout;
+
 	while (true) {
 		waitForCommand();
 		if (!initGrammar()) {
@@ -240,11 +241,12 @@ void waitForCommand()
 	char keyin[32];
 	
 	while (true) {
-		printf("按c键启动为桌面的语法文件grammar.txt生成语法分析表的工作：");
+		printf("Press key C to start the job of generating a grammar parsing table ");
+		printf("for the grammar file named grammar.txt on the desktop:");
 		gets(keyin);
 		if (!strcmp(keyin, "c") || !strcmp(keyin, "C"))
 			break;
-		printf("指令错误\n\n");
+		printf("Invalid command\n\n");
 	}
 }
 
@@ -279,7 +281,7 @@ bool readLines()
 	fin = fopen(fileName, "r");
 
 	if (!fin) {
-		printf("文件grammar.txt打开失败\n\n");
+		printf("Failed to open file grammar.txt\n\n");
 		return false;
 	}
 
@@ -340,7 +342,7 @@ bool formPrimitiveProductionSet()
 	unsigned short count = 1;
 
 	if (!lineList) {
-		printf("文件中无内容\n");
+		printf("There are no contents in the file\n");
 		return false;
 	}
 
@@ -353,7 +355,7 @@ bool formPrimitiveProductionSet()
 		line = ((String*)walk->elem)->str;
 
 		if (!isProduction(line)) {
-			printf("第%d行不是一个产生式\n", i);
+			printf("Line %d is not a production\n", i);
 			return false;
 		}
 
@@ -381,7 +383,7 @@ bool formPrimitiveProductionSet()
 			equals(newStrs->head->elem, headStr)) {
 			freeElem(newStr);
 			freeList(newStrs);
-			printf("第%d行不是一个产生式\n", i);
+			printf("Line %d is not a production\n", i);
 			return false;
 		}
 
@@ -393,9 +395,9 @@ bool formPrimitiveProductionSet()
 			freeList(newStrs);
 
 		if (contains(primitiveProductionSet, pp)) {
-			printf("该产生式已经存在\n\n");
+			printf("This production already exists\n\n");
 			freeElem(pp);
-			printf("第%d行的产生式已经存在\n", i);
+			printf("Production as line %d already exists\n", i);
 			return false;
 		}
 
@@ -629,7 +631,7 @@ bool isProduction(char *str)
 
 	if (!headEnd ||
 		headEnd == str) {
-		printf("不是产生式\n\n");
+		printf("Not a production.\n\n");
 		return false;
 	}
 
@@ -637,7 +639,7 @@ bool isProduction(char *str)
 
 	if (!isEffectiveStr(str) ||
 		!isEffectiveHead(str)) {
-		printf("不是产生式\n\n");
+		printf("Not a production.\n\n");
 		return false;
 	}
 
@@ -1216,7 +1218,7 @@ Action *generateAction(Action *prev, Action *action)
 		free(action);
 		return prev;
 	} else {
-		printf("该文法不是LALR的\n");
+		printf("This grammar does not correspond to LALR\n");
 		return NULL;
 	}
 }
@@ -1231,34 +1233,35 @@ void printParsingTable()
 	unsigned short i, j;
 	Node *walk;
 
-	printf("\n\n将要打印语法分析表，请选择打印格式\n");
+	printf("\n\nChoose a format for the grammar parsing table about to be printed.\n");
 
 	while (true) {
-		printf("按1选择默认格式，按2选择语法分析器源码的初始化数据格式：");
+		printf("Press 1 for default, press 2 for source code static data format:");
 		gets(keyin);
 		if (!strcmp(keyin, "1") || !strcmp(keyin, "2"))
 			break;
-		printf("指令错误\n\n");
+		printf("Invalid command\n\n");
 	}
 
 	if (!strcmp(keyin, "2"))
 		forParser = true;
 
-	printf("\n请选择打印位置\n");
+	printf("\nChoose a place for the print.\n");
 
 	while (true) {
-		printf("按1选择在本窗口打印，按2选择在桌面生成文件grammar parsing table.txt并在其中打印：");
+		printf("Press 1 to print it into this window, ");
+		printf("press 2 to generate a file named 'grammar parsing table.txt' and print it into the file:");
 		gets(keyin);
 		if (!strcmp(keyin, "1") || !strcmp(keyin, "2"))
 			break;
-		printf("指令错误\n\n");
+		printf("Invalid command\n\n");
 	}
 
 	if (!strcmp(keyin, "2")) {
 		char *fileName = "C:\\Users\\lenovo\\Desktop\\grammar parsing table.txt";
 		fout = fopen(fileName, "w");
 		if (!fout) {
-			printf("文件创建失败\n");
+			printf("Failed to create a file.\n");
 			exit(1);
 		}
 	}
@@ -1329,7 +1332,7 @@ void printParsingTable()
 		fclose(fout);
 	}
 
-	printf("\n语法分析表打印成功\n\n");
+	printf("\nGrammar parsing table printing succeeds.\n\n");
 }
 
 /*
@@ -1344,7 +1347,7 @@ void printProductionTable()
 	fout = fopen(fileName, "w");
 
 	if (!fout) {
-		printf("经左递归消除的产生式文件生成失败\n");
+		printf("Failed to create a file for productions that have undergone left recursion elimination.\n");
 		return;
 	}
 
@@ -1356,7 +1359,7 @@ void printProductionTable()
 
 	fclose(fout);
 
-	printf("经左递归消除的产生式文件productions table.txt已在桌面生成\n\n\n");
+	printf("File has been created for productions that have undergone left recursion elimination.\n\n\n");
 }
 
 /*
@@ -1864,18 +1867,17 @@ void printElem(void *elem)
 			Action *action = elem;
 			switch (action->actionType) {
 				case SHIFT_IN:
-					fprintf(fout, "移入状态%d", action->id);
+					fprintf(fout, "load state %d", action->id);
 					break;
 				case REDUCE:
-					fprintf(fout, "按产生式%d：", action->id - 1);
+					fprintf(fout, "reduce accoring to production %d：", action->id - 1);
 					printElem(&productions[action->id]);
-					fprintf(fout, "归约");
 					break;
 				case ACCEPT:
 					fprintf(fout, "ACCEPT");
 					break;
 				case GOTO:
-					fprintf(fout, "goto状态%d", action->id);
+					fprintf(fout, "goto state %d", action->id);
 			}
 			break;
 		}
